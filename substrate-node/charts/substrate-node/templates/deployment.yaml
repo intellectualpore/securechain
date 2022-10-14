@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "substrate-node.fullname" . }}
+  labels:
+    {{- include "substrate-node.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "substrate-node.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "substrate-node.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "substrate-node.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: p2p
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+            - name: rpc
+              containerPort: {{ .Values.rpc_port }}
+              protocol: TCP
+            - name: ws
+              containerPort: {{ .Values.ws_port }}
+              protocol: TCP
+          env:
+          - name: SUBSTRATE_NAME
+            value: {{ .Values.name }}
+          - name: SUBSTRATE_PORT
+            value: {{ .Values.port | quote }}
+          - name: SUBSTRATE_WS_PORT
+            value: {{ .Values.ws_port | quote }}
+          - name: SUBSTRATE_RPC_PORT
+            value: {{ .Values.rpc_port | quote }}
+          - name: SUBSTRATE_BOOT_NODE
+            value: {{ .Values.boot_node }}
+          - name: CHAINSPEC
+            value: {{ .Values.chainspec }}
+          - name: WS_MAX_CONNECTIONS
+            value: {{ .Values.ws_max_connections | quote }}
+          - name: SUBSTRATE_RPC_METHODS
+            value: {{ .Values.rpc_methods }}
+          args: [
+            "--name", "$(SUBSTRATE_NAME)",
+            "--rpc-cors=all",
+            "--rpc-methods", "$(SUBSTRATE_RPC_METHODS)",
+            "--base-path=/storage",
+            "--keystore-path=/keystore",
+            "--chain=$(CHAINSPEC)",
+            "--port", "$(SUBSTRATE_PORT)",
+            "--ws-port", "$(SUBSTRATE_WS_PORT)",
+            "--rpc-port", "$(SUBSTRATE_RPC_PORT)",
+            {{ if .Values.boot_node }}
+            "--bootnodes", "$(SUBSTRATE_BOOT_NODE)",
+            {{ end }}
+            {{ if .Values.is_validator }}
+            "--node-key-file","/keys/node",
+            "--validator",
+            {{ else }}
+            "--ws-external",
+            "--pruning", "archive",
+            {{ end }}
+            "--ws-max-connections", "$(WS_MAX_CONNECTIONS)",
+            {{ if .Values.disable_offchain_worker }}
+            "--offchain-worker", "Never",
+            {{ end }}
+            {{ if .Values.telemetry_url }}
+            "--telemetry-url", {{ .Values.telemetry_url | quote }},
+            {{ end }}
+          ]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: chain-storage-{{ .Release.Name }}
+              mountPath: /storage
+            - name: keystore
+              mountPath: /keystore
+            - name: keys
+              mountPath: /keys
+              readOnly: true 
+      {{ if .Values.is_validator }}
+      initContainers:
+        - name: insert-aura-key
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [
+            "key",
+            "insert",
+            "--keystore-path=/keystore",
+            "--key-type", "aura",
+            "--suri","/keys/aura",
+            "--scheme=sr25519"
+          ]
+          volumeMounts:
+            - name: keystore
+              mountPath: /keystore
+            - name: keys
+              mountPath: /keys
+              readOnly: true 
+        - name: insert-grandpa-key
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [
+            "key",
+            "insert",
+            "--keystore-path=/keystore",
+            "--key-type", "gran",
+            "--suri","/keys/grandpa",
+            "--scheme=ed25519"
+          ]
+          volumeMounts:
+            - name: keystore
+              mountPath: /keystore
+            - name: keys
+              mountPath: /keys
+              readOnly: true
+        - name: insert-tft-key
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [
+            "key",
+            "insert",
+            "--keystore-path=/keystore",
+            "--key-type", "tft!",
+            "--suri","/keys/tft",
+            "--scheme=sr25519"
+          ]
+          volumeMounts:
+            - name: keystore
+              mountPath: /keystore
+            - name: keys
+              mountPath: /keys
+              readOnly: true
+      {{ end }}
+      volumes:
+        - name: keystore
+          emptyDir: {}
+        - name: keys
+          secret:
+            secretName: {{ include "substrate-node.fullname" .  }}-keys
+        - name: chain-storage-{{ .Release.Name }}
+          persistentVolumeClaim:
+            claimName: {{if .Values.volume.existingpersistentVolumeClaim }} {{.Values.volume.existingpersistentVolumeClaim}} {{ else }} substrate-node-volume-claim-{{ .Release.Name }} {{ end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

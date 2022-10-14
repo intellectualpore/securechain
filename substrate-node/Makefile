@@ -1,0 +1,28 @@
+.PHONY: init
+init:
+	./scripts/init.sh
+
+.PHONY: check
+check:
+	SKIP_WASM_BUILD=1 cargo check
+
+.PHONY: test
+test:
+	SKIP_WASM_BUILD=1 cargo test --release --all
+
+.PHONY: run
+run:
+	cargo run --release -- --dev --tmp
+
+.PHONY: debug
+debug:
+	cargo run --dev --tmp
+
+.PHONY: build
+build:
+	cargo build --release
+
+.PHONY: build-debug
+build-debug:
+	cargo build
+
